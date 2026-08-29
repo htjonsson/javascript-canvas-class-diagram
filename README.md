@@ -8,7 +8,7 @@ Motif 2.3+ Widget Hierarchy
 ![Motif Hierarchy Image](MotifHierachy.png)
 
 ViewKit/ViewKlass Class Hierarchy
-![ViewKit/ViewKlass Class Image](ViewKitHierachy.png)
+![ViewKit/ViewKlass Class Image](ViewKitHierarchy.png)
 
 IBM Open Class Hierarchy (UI part)
 ![IBM Open Class Image](IBMOpenClassHierachy.png)
