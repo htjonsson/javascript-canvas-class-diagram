@@ -1,0 +1,1988 @@
+To save your tree diagram's configuration data rather than its visual pixels, you can add a feature that exports the tree layout straight to a structured JSON file. This allows users to download the data to their machine and reload the exact structure later.
+Here is the updated code. I have introduced a "💾 Download Data to File" button. When clicked, it parses the entire tree dynamically, cleans out runtime calculation variables (like x, y, and gridPos), converts it into a standard JSON string format, and downloads it as a .json text file.
+## Complete HTML & JavaScript Code
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Download Data Aligned Tree Diagram</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+            font-family: Arial, sans-serif;
+            overflow: hidden; 
+        }
+        .controls {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            background-color: #2C3E50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #34495E;
+        }
+        #downloadDataBtn {
+            background-color: #2980b9;
+        }
+        #downloadDataBtn:hover {
+            background-color: #3498db;
+        }
+        .instructions {
+            font-size: 13px;
+            color: #7f8c8d;
+        }
+        .canvas-container {
+            width: 85vw;
+            height: 90vh;
+            cursor: grab;
+            overflow: scroll; /* Forces both vertical and horizontal bars to show */
+        }
+        .canvas-container:active {
+            cursor: grabbing;
+            overflow: scroll;
+        }
+        /* Custom visible scrollbar engine */
+        .canvas-container::-webkit-scrollbar {
+            width: 14px;
+            height: 14px;
+            display: block;
+        }
+        .canvas-container::-webkit-scrollbar-track {
+            background: #e0e0e0;
+        }
+        .canvas-container::-webkit-scrollbar-thumb {
+            background: #4A90E2; /* Distinct blue color so it's highly visible */
+            border-radius: 4px;
+        }
+        .canvas-container::-webkit-scrollbar-thumb:hover {
+            background: #357ABD;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="controls">
+        <button id="toggleOrientation">Switch to Horizontal Layout</button>
+        <button id="resetView">Reset View</button>
+        <button id="zoomOut">Zoom Out (10%)</button>
+        <button id="downloadDataBtn">💾 Download Data to File</button>
+        <span class="instructions">💡 Saves the structural tree layout as a JSON text file.</span>
+    </div>
+    
+    <div class="canvas-container" id="canvasWrapper">
+        <canvas id="treeCanvas"></canvas>
+    </div>
+
+    <script>
+        class LayoutNode {
+            constructor() {
+                this.depth = 0; 
+                this.level = 0; 
+            }
+        }
+
+        class Node {
+            constructor(name) {
+                this.id = name;
+                this.name = name;
+                this.children = [];
+                this.isSelected = false;
+                // Layout
+                this.layout = new LayoutNode();
+                // Core
+                this.x = 0;
+                this.y = 0;
+                this.width = 160;
+                this.height = 40;
+                // Background Color
+                this.backgroundColor = "#34495E";
+                // Font Style
+                this.font = "bold 12px sans-serif";
+                this.color = "#ffffff";
+                this.textAlign = "center";
+                this.textBaseline = "middle";
+            }
+            
+            addChild(child) { 
+                this.children.push(child); 
+            }
+        }
+
+        class NodeXY {
+            constructor(id, text, x, y, width, height, children) {
+                this.id = id;
+                this.text = text;
+                this.x = x;
+                this.y = y;
+                this.width = width;
+                this.height = height;
+                this.children = [];
+
+                children.forEach(e => {
+                    this.children.push(new NodeXY(e.id, e.name, e.x, e.y, e.width, e.height, e.children));
+                });
+            }
+        }        
+
+        class Renderer {
+            constructor(ctx) {
+                this.ctx = ctx;
+            }
+
+            drawNode(node) {
+                const rx = node.x - (node.width / 2);
+                const ry = node.y - (node.height / 2);
+
+                this.ctx.beginPath();
+                this.ctx.roundRect(rx, ry, node.width, node.height, 6);
+                this.ctx.fillStyle = node.backgroundColor;
+                this.ctx.fill();
+
+                this.ctx.fillStyle = node.color;
+                this.ctx.font = node.font;
+                this.ctx.textAlign = node.textAlign;
+                this.ctx.textBaseline = node.textBaseline;
+
+                this.ctx.fillText(node.name, node.x, node.y);
+
+                if (node.isSelected === true) {
+                    this.drawSelected(node);
+                }
+                // this.ctx.fillText("(dep) " + node.depth + " (lvl) " + node.level + " (" + node.x + "," + node.y + ")", node.x, node.y);
+            }
+
+            drawSelected(node) {
+                const rx = node.x - (node.width / 2);
+                const ry = node.y - (node.height / 2);
+
+                const padding = 2;
+                this.ctx.strokeStyle = '#ff3b30';
+                this.ctx.lineWidth = 2;
+                this.ctx.strokeRect(rx - padding, ry - padding, node.width + padding * 2, node.height + padding * 2); 
+            }
+
+            drawVertical(parent, child) {
+                this.ctx.beginPath();
+                this.ctx.strokeStyle = "#cbd5e1";
+                this.ctx.lineWidth = 2;
+
+                let midY = (parent.y + child.y) / 2;
+                this.ctx.moveTo(parent.x, parent.y);
+                this.ctx.lineTo(parent.x, midY);
+                this.ctx.lineTo(child.x, midY);
+                this.ctx.lineTo(child.x, child.y);
+
+                this.ctx.stroke();
+            }
+
+            drawHorizontal(parent, child) {
+                this.ctx.beginPath();
+                this.ctx.strokeStyle = "#cbd5e1";
+                this.ctx.lineWidth = 2;
+
+                let midX = (parent.x + child.x) / 2;
+                this.ctx.moveTo(parent.x, parent.y);
+                this.ctx.lineTo(midX, parent.y);
+                this.ctx.lineTo(midX, child.y);
+                this.ctx.lineTo(child.x, child.y);
+
+                this.ctx.stroke();
+            }            
+        }
+
+        class VerticalLayoutManager {
+            constructor(gridSpacing, layerGap, margin) {
+                this.gridSpacing = gridSpacing;
+                this.layerGap = layerGap;
+                this.margin = margin;
+                this.layoutManager = new GenericLayoutManager();             
+            }
+
+            doLayout(node) {
+                this.assignGridPositions(node);
+                this.mapGridToPixels(node, 0);                  
+            }
+
+            doLayout(canvas, node) {
+                this.assignGridPositions(node);
+                this.resizeCanvas(canvas);
+                this.mapGridToPixels(node, 0);                
+            }   
+            
+            assignGridPositions(node, level = 0) {
+                this.layoutManager.assignGridPositions(node, level);
+            }
+            
+            mapGridToPixels(node, level) {
+                node.x = node.layout.depth * this.gridSpacing + this.margin;
+                node.y = level * this.layerGap + this.margin;                
+                
+                node.children.forEach(child => this.mapGridToPixels(child, level + 1));
+            }
+            
+            resizeCanvas(canvas) {
+                canvas.width = this.getWidth();
+                canvas.height = this.getHeight();
+            }   
+
+            getHeight() {
+                return this.layoutManager.maxLevel * this.layerGap + (this.margin * 2);
+            }
+
+            getWidth() {
+                return (this.layoutManager.leafCounter - 1) * this.gridSpacing + (this.margin * 2);
+            }
+        }
+
+        class HorizontalLayoutManager {
+            constructor(gridSpacing, layerGap, margin) {
+                this.gridSpacing = gridSpacing;
+                this.layerGap = layerGap;
+                this.margin = margin;
+                this.layoutManager = new GenericLayoutManager();             
+            }   
+            
+            doLayout2(node) {
+                this.assignGridPositions(node);
+                this.mapGridToPixels(node, 0);                    
+            }
+
+            doLayout(canvas, node) {
+                this.assignGridPositions(node);
+                this.resizeCanvas(canvas);
+                this.mapGridToPixels(node, 0);                
+            }
+            
+            assignGridPositions(node, level = 0) {
+                this.layoutManager.assignGridPositions(node, level);
+            }
+            
+            mapGridToPixels(node, level) {
+                node.x = level * this.layerGap + this.margin;
+                node.y = node.layout.depth * this.gridSpacing + this.margin;
+                
+                node.children.forEach(child => this.mapGridToPixels(child, level + 1));
+            }
+            
+            resizeCanvas(canvas) {
+                canvas.width = this.getWidth();
+                canvas.height = this.getHeight();
+            }   
+            
+            getHeight() {
+                return (this.layoutManager.leafCounter - 1) * this.gridSpacing + (this.margin * 2);
+            }
+
+            getWidth() {
+                return this.layoutManager.maxLevel * this.layerGap + (this.margin * 2);
+            }
+        }   
+
+        class GenericLayoutManager {
+            constructor() {
+                // this.horizontalStyle = new LayoutStyle(40 + 10, 160 + 30, 60);
+                // this.verticalStyle = new LayoutStyle(150 + 20, 40 + 30, 60);
+                this.leafCounter = 0;
+                this.maxLevel = 0;
+                this.allNodesList = [];
+            }
+
+            doLayout(canvas, node, isVertical) {
+                this.assignGridPositions(node);
+                // this.resizeCanvas(canvas, isVertical);
+                // this.mapGridToPixels(node, 0, isVertical);                
+            }
+
+            assignGridPositions(node, level = 0) {
+                if (level === 0) {
+                    this.allNodesList = []; 
+                    this.leafCounter = 0;
+                    this.maxLevel = 0;
+                }
+                    
+                this.allNodesList.push(node);
+
+                if (level > this.maxLevel) 
+                    this.maxLevel = level;
+
+                if (node.children.length === 0) {
+                    node.layout.depth = this.leafCounter;
+                    this.leafCounter++;
+                } else {
+                    node.children.forEach(child => this.assignGridPositions(child, level + 1));
+
+                    const firstChildGrid = node.children[0].layout.depth;
+                    const lastChildGrid = node.children[node.children.length - 1].layout.depth;           
+                    
+                    node.layout.depth = (firstChildGrid + lastChildGrid) / 2;
+                }
+                node.layout.level = level;
+            }
+            
+            // mapGridToPixels(node, level, isVertical) {
+            //     if (isVertical) {
+            //         node.x = node.layout.depth * this.verticalStyle.gridSpacing + this.verticalStyle.margin;
+            //         node.y = level * this.verticalStyle.layerGap + this.verticalStyle.margin;
+            //     } else {
+            //         node.x = level * this.horizontalStyle.layerGap + this.horizontalStyle.margin;
+            //         node.y = node.layout.depth * this.horizontalStyle.gridSpacing + this.horizontalStyle.margin;
+            //     }
+            //     node.children.forEach(child => this.mapGridToPixels(child, level + 1, isVertical));
+            // }
+            
+            // resizeCanvas(canvas, isVertical) {
+            //     if (isVertical) {
+            //         canvas.width = (this.leafCounter - 1) * this.verticalStyle.gridSpacing + (this.verticalStyle.margin * 2);
+            //         canvas.height = this.maxLevel * this.verticalStyle.layerGap + (this.verticalStyle.margin * 2);
+            //     } else {
+            //         canvas.width = this.maxLevel * this.horizontalStyle.layerGap + (this.horizontalStyle.margin * 2);
+            //         canvas.height = (this.leafCounter - 1) * this.horizontalStyle.gridSpacing + (this.horizontalStyle.margin * 2);
+            //     }
+            // }             
+        }
+
+        class ViewState {
+            constructor() {
+                // Interactive Zoom, Pan, & Click States
+                this.scale = 0.8;
+                this.offsetX = 0;
+                this.offsetY = 0; 
+                
+                this.isDragging = false;
+                this.startX = 0;
+                this.startY = 0;
+                this.totalDragDistance = 0;                 
+            }
+        }
+
+        class MouseDragging {
+            constructor() {
+                this.isDragging = false;
+                this.startX = 0;
+                this.startY = 0;
+                this.offsetX = 0;
+                this.offsetY = 0;
+                this.totalDragDistance = 0;                 
+            }
+
+            begin (event) {
+                this.isDragging = true;
+
+                this.startX = event.clientX - this.offsetX;
+                this.startY = event.clientY - this.offsetY;
+
+                this.totalDragDistance = 0;                 
+            }
+
+            end (event) {
+                if (!this.isDragging)
+                    return;     
+
+                this.isDragging = false;
+
+                return (this.totalDragDistance < 5);
+            }
+
+            move (event) {
+                if (!this.isDragging)
+                    return false;
+
+                const currentOffsetX = event.clientX - startX;
+                const currentOffsetY = event.clientY - startY;
+        
+                this.totalDragDistance += Math.abs(currentOffsetX - this.offsetX) + Math.abs(currentOffsetY - this.offsetY);
+
+                this.offsetX = currentOffsetX;
+                this.offsetY = currentOffsetY;
+
+                return true;
+            }
+        }
+
+        class View {
+            constructor(canvas, ctx) {
+                this.canvas = canvas;
+                this.ctx = ctx;
+                
+                this.isVertical = false;
+
+                this.layoutManager = new GenericLayoutManager();                
+
+                this.scale = 0.8;
+                this.offsetX = 0;
+                this.offsetY = 0;
+            }
+
+            draw(root) {  
+                this.root = root;
+                this.layoutManager.doLayout(this.canvas, root);   
+                this.draw1(this.root);
+            }
+
+            draw1(node) {
+                this.ctx.save();
+                this.ctx.setTransform(1, 0, 0, 1, 0, 0); 
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.restore();
+
+                this.ctx.save();
+                this.ctx.translate(this.offsetX, this.offsetY);
+                this.ctx.scale(this.scale, this.scale);
+
+                this.draw2(this.ctx, node, this.isVertical);
+
+                this.ctx.restore();
+            }
+
+            draw2(ctx, node, isVertical) {  
+                const renderer = new Renderer(this.ctx);
+                this.draw3(renderer, node, isVertical);
+            }
+
+            draw3(renderer, node, isVertical) {    
+                node.children.forEach(child => {
+                    if (isVertical) {
+                        renderer.drawVertical(node, child);
+                    } else {
+                        renderer.drawHorizontal(node, child);
+                    }
+                    
+                    this.draw3(renderer, child, isVertical);
+                });
+                
+                renderer.drawNode(node);
+            }
+        }
+
+        let currentOrientation = 'vertical';
+
+        // Interactive Zoom, Pan, & Click States
+        let scale = 0.8;
+        let offsetX = 0;
+        let offsetY = 0;
+        
+        let isDragging = false;
+        let startX = 0;
+        let startY = 0;
+        let totalDragDistance = 0; 
+
+        function loadMotifHierarchy() {
+
+            const object = new Node("Object");
+            object.backgroundColor = "#4A90E2";
+
+            const rectObject = new Node("RectObj");
+            rectObject.fillStyle = "#4A90E2";
+            object.addChild(rectObject);
+
+            const windowObject = new Node("WindowObj");
+            windowObject.fillStyle = "#4A90E2";
+            rectObject.addChild(windowObject);
+
+            const core = new Node("Core");
+            core.fillStyle = "#4A90E2";
+            windowObject.addChild(core);
+
+            const gadget = new Node("Gadget");
+            core.addChild(gadget);
+
+            gadget.addChild(new Node("ArrowButtonGadget"));
+            const labelGadget = new Node("LabelGadget");
+            gadget.addChild(labelGadget);
+            gadget.addChild(new Node("SeparatorGadget"));
+
+            labelGadget.addChild(new Node("CascadeButtonGadget"));
+            labelGadget.addChild(new Node("PushButtonGadget"));
+            labelGadget.addChild(new Node("ToolButtonGadget"));
+
+            const primitive = new Node("Primitive");
+            core.addChild(primitive);
+
+            primitive.addChild(new Node("ArrowButton"));
+            const label = new Node("Label")
+            primitive.addChild(label);
+            primitive.addChild(new Node("List"));
+            primitive.addChild(new Node("Scrollbar"));
+            primitive.addChild(new Node("Separator"));
+            primitive.addChild(new Node("Text"));
+            primitive.addChild(new Node("TextField"));
+
+            label.addChild(new Node("CascadeButton"));
+            label.addChild(new Node("DrawButton"));
+            label.addChild(new Node("PushButton"));
+            label.addChild(new Node("ToggleButton"));
+
+            const composite = new Node("Composite");
+            composite.fillStyle = "#4A90E2"; 
+            core.addChild(composite);
+
+            const constraint = new Node("Constraint");
+            constraint.fillStyle = "#4A90E2";
+            composite.addChild(constraint);
+
+            const manager = new Node("Manager");
+            constraint.addChild(manager);
+
+            const bulletinBoard = new Node("BulletinBoard");
+            manager.addChild(bulletinBoard);
+            manager.addChild(new Node("DrawingArea"));
+            manager.addChild(new Node("Frame"));
+            manager.addChild(new Node("PanedWindow"));
+            manager.addChild(new Node("RowColumn"));
+            manager.addChild(new Node("Scale"));
+            const scrolledWindow = new Node("ScrolledWindow");
+            manager.addChild(scrolledWindow);
+
+            bulletinBoard.addChild(new Node("Form"));
+            const selectionBox = new Node("SelectionBox");
+            bulletinBoard.addChild(selectionBox);
+            bulletinBoard.addChild(new Node("MessageBox"));
+
+            selectionBox.addChild(new Node("Command"));
+            selectionBox.addChild(new Node("FileSelectionBox"));
+            
+            scrolledWindow.addChild(new Node("MainWindow"));
+
+            const shell = new Node("Shell");
+            shell.fillStyle = "#4A90E2";
+            composite.addChild(shell);
+
+            const overrideShell = new Node("OverrideShell");
+            overrideShell.fillStyle = "#4A90E2";
+            shell.addChild(overrideShell);
+            const wmShell = new Node("WMShell");
+            wmShell.fillStyle = "#4A90E2";
+            shell.addChild(wmShell);
+
+            overrideShell.addChild(new Node("MenuShell"));
+
+            const vendorShell = new Node("VendorShell");
+            vendorShell.fillStyle = "#4A90E2";
+            wmShell.addChild(vendorShell);
+
+            const topLevelShell = new Node("TopLevelShell");
+            topLevelShell.fillStyle = "#4A90E2";
+            vendorShell.addChild(topLevelShell);
+            const transientShell = new Node("TransientShell");
+            transientShell.fillStyle = "#4A90E2";
+            vendorShell.addChild(transientShell);
+            
+            const applicationShell = new Node("ApplicationShell");
+            applicationShell.fillStyle = "#4A90E2";
+            topLevelShell.addChild(applicationShell);
+    
+            transientShell.addChild(new Node("DialogShell"));
+
+            return object;
+        }
+
+        function loadHierachyData() {
+            const root = new Node("CEO");
+            const vpHr = new Node("VP HR");
+            const vpTech = new Node("VP Tech");
+            const vpSales = new Node("VP Sales");
+
+            root.addChild(vpHr); root.addChild(vpTech); 
+            root.addChild(vpSales);
+            
+            vpHr.addChild(new Node("Recruiting")); 
+            vpHr.addChild(new Node("Payroll"));
+            
+            const devOps = new Node("DevOps");
+            vpTech.addChild(devOps);
+            vpTech.addChild(new Node("Frontend"));
+            vpTech.addChild(new Node("Backend"));
+            devOps.addChild(new Node("Cloud")); 
+
+            vpSales.addChild(new Node("Europe")); 
+            vpSales.addChild(new Node("Americas"));
+
+            return root;
+        }
+
+        function loadViewKitHierarchy() {
+
+            const viewKit = new Node("ViewKit");
+
+            const widgetList = new Node("VkWidgetList");
+            viewKit.addChild(widgetList);  
+
+            const callbackObject = new Node("VkCallbackObject");
+            viewKit.addChild(callbackObject);  
+
+            const component = new Node("VkComponent");
+            callbackObject.addChild(component);  
+
+            const action = new Node("VkAction");
+            viewKit.addChild(action);      
+
+            const alignmentGroup = new Node("VkAlignmentGroup");
+            widgetList.addChild(alignmentGroup);
+
+            const app = new Node("VkApp");
+            component.addChild(app);
+
+            const msgApp = new Node("VkMsgApp");
+            msgApp.backgroundColor = "#4A90E2";
+            app.addChild(msgApp);
+
+            const soMsgApp = new Node("VkSoMsgApp");
+            soMsgApp.backgroundColor = "#4A90E2";
+            msgApp.addChild(soMsgApp);
+            
+            const soApp = new Node("VkSoApp");
+            soApp.backgroundColor = "#4A90E2";
+            app.addChild(soApp);            
+
+            const background = new Node("VkBackground");
+            viewKit.addChild(background);            
+
+            const dialogManager = new Node("VkDialogManager");
+            component.addChild(dialogManager);    
+
+            const busyDialog = new Node("VkBusyDialog");
+            dialogManager.addChild(busyDialog);              
+
+            const callbackList = new Node("VkCallbackList");
+            viewKit.addChild(callbackList);  
+
+            const checkBox = new Node("VkCheckBox");
+            component.addChild(checkBox); 
+
+            const completionField = new Node("VkCompletionField");
+            component.addChild(completionField); 
+
+            const componentList = new Node("VkComponentList");
+            viewKit.addChild(componentList); 
+
+            const cursorList = new Node("VkCursorList");
+            viewKit.addChild(cursorList); 
+
+            const busyCursors = new Node("VkBusyCursors");
+            busyCursors.backgroundColor = "#4A90E2";
+            cursorList.addChild(busyCursors);
+
+            const errorDialog = new Node("VkErrorDialog");
+            dialogManager.addChild(errorDialog); 
+
+            const fatalErrorDialog = new Node("VkFatalErrorDialog");
+            errorDialog.addChild(fatalErrorDialog); 
+
+            const fileSelectionDialog = new Node("VkFileSelectionDialog");
+            dialogManager.addChild(fileSelectionDialog); 
+
+            const gangedGroup = new Node("VkGangedGroup");
+            widgetList.addChild(gangedGroup); 
+
+            const genericDialog = new Node("VkGenericDialog");
+            dialogManager.addChild(genericDialog);             
+
+            const menuItem = new Node("VkMenuItem");
+            component.addChild(menuItem);  
+
+            const menu = new Node("VkMenu");
+            menuItem.addChild(menu);  
+
+            const subMenu = new Node("VkSubMenu");
+            menu.addChild(subMenu);  
+
+            const helpPane = new Node("VkHelpPane");
+            subMenu.addChild(helpPane);             
+
+            const infoDialog = new Node("VkInfoDialog");
+            dialogManager.addChild(infoDialog); 
+
+            const input = new Node("VkInput");
+            callbackObject.addChild(input); 
+
+            const interruptDialog = new Node("VkInterruptDialog");
+            busyDialog.addChild(interruptDialog); 
+
+            const menuAction = new Node("VkMenuAction");
+            menuItem.addChild(menuAction);  
+
+            const menuActionObject = new Node("VkMenuActionObject");
+            menuAction.addChild(menuActionObject); 
+
+            const menuActionWidget = new Node("VkMenuActionWidget");
+            menuAction.addChild(menuActionWidget);
+
+            const menuBar = new Node("VkMenuBar");
+            menu.addChild(menuBar); 
+
+            const menuConfirmFirstAction = new Node("VkMenuConfirmFirstAction");
+            menuAction.addChild(menuConfirmFirstAction);
+
+            const menuLabel = new Node("VkMenuLabel");
+            menuItem.addChild(menuLabel);
+
+            const menuSeparator = new Node("VkMenuSeparator");
+            menuLabel.addChild(menuSeparator);
+
+            const menuToggle = new Node("VkMenuToggle");
+            menuAction.addChild(menuToggle);
+
+            const menuUndoManager = new Node("VkMenuUndoManager");
+            menuAction.addChild(menuUndoManager);
+
+            const messageDialog = new Node("VkMessageDialog");
+            dialogManager.addChild(messageDialog); 
+
+            const model = new Node("VkModel");
+            callbackObject.addChild(model); 
+
+            const msgClient = new Node("VkMsgClient");
+            msgClient.backgroundColor = "#4A90E2";
+            viewKit.addChild(msgClient); 
+
+            const msgFacility = new Node("VkMsgFacility");
+            msgFacility.backgroundColor = "#4A90E2";
+            viewKit.addChild(msgFacility); 
+
+            const msgService = new Node("VkMsgService");
+            msgService.backgroundColor = "#4A90E2";
+            msgFacility.addChild(msgService); 
+                        
+            const listSearch = new Node("VkListSearch");
+            listSearch.backgroundColor = "#4A90E2";
+            viewKit.addChild(listSearch);
+
+            const nameList = new Node("VkNameList");
+            viewKit.addChild(nameList); 
+
+            const optionMenu = new Node("VkOptionMenu");
+            menu.addChild(optionMenu); 
+
+            const periodic = new Node("VkPeriodic");
+            callbackObject.addChild(periodic); 
+
+            const pipe = new Node("VkPipe");
+            callbackObject.addChild(pipe); 
+
+            const popupMenu = new Node("VkPopupMenu");
+            menu.addChild(popupMenu); 
+
+            const prefItem = new Node("VkPrefItem");
+            component.addChild(prefItem); 
+
+            const prefCustom = new Node("VkPrefCustom");
+            prefItem.addChild(prefCustom); 
+
+            const prefDialog = new Node("VkPrefDialog");
+            genericDialog.addChild(prefDialog); 
+
+            const prefEmpty = new Node("VkPrefEmpty");
+            prefCustom.addChild(prefEmpty); 
+
+            const prefGroup = new Node("VkPrefGroup");
+            prefItem.addChild(prefGroup); 
+
+            const prefLabel = new Node("VkPrefLabel");
+            prefItem.addChild(prefLabel); 
+
+            const prefList = new Node("VkPrefList");
+            prefGroup.addChild(prefList); 
+
+            const prefOption = new Node("VkPrefOption");
+            prefItem.addChild(prefOption); 
+
+            const prefRadio = new Node("VkPrefRadio");
+            prefGroup.addChild(prefRadio); 
+
+            const prefSeparator = new Node("VkPrefSeparator");
+            prefItem.addChild(prefSeparator); 
+
+            const prefText = new Node("VkPrefText");
+            prefItem.addChild(prefText); 
+
+            const prefToggle = new Node("VkPrefToggle");
+            prefItem.addChild(prefToggle); 
+
+            const program = new Node("VkProgram");
+            callbackObject.addChild(program); 
+
+            const progressDialog = new Node("VkProgressDialog");
+            interruptDialog.addChild(progressDialog); 
+
+            const colorChooserDialog = new Node("VkColorChooserDialog");
+            colorChooserDialog.backgroundColor = "#4A90E2";
+            dialogManager.addChild(colorChooserDialog); 
+            
+            const promptDialog = new Node("VkPromptDialog");
+            dialogManager.addChild(promptDialog); 
+
+            const questionDialog = new Node("VkQuestionDialog");
+            dialogManager.addChild(questionDialog); 
+
+            const radioBox = new Node("VkRadioBox");
+            checkBox.addChild(radioBox); 
+
+            const radioGroup = new Node("VkRadioGroup");
+            widgetList.addChild(radioGroup); 
+
+            const radioSubMenu = new Node("VkRadioSubMenu");
+            subMenu.addChild(radioSubMenu); 
+
+            const repeatButton = new Node("VkRepeatButton");
+            component.addChild(repeatButton); 
+
+            const runOnce = new Node("VkRunOnce");
+            callbackObject.addChild(runOnce); 
+
+            const selectionDialog = new Node("VkSelectionDialog");
+            dialogManager.addChild(selectionDialog); 
+
+            const simpleWindow = new Node("VkSimpleWindow");
+            component.addChild(simpleWindow); 
+
+            const subProcess = new Node("VkSubProcess");
+            callbackObject.addChild(subProcess);           
+
+            const warningDialog = new Node("VkWarningDialog");
+            dialogManager.addChild(warningDialog); 
+
+            const window = new Node("VkWindow");
+            simpleWindow.addChild(window);  
+
+            const deck = new Node("VkDeck");
+            deck.backgroundColor = "#4A90E2";
+            component.addChild(deck); 
+
+            const doubleBuffer = new Node("VkDoubleBuffer");
+            doubleBuffer.backgroundColor = "#4A90E2";
+            component.addChild(doubleBuffer);             
+     
+            const meter = new Node("VkMeter");
+            meter.backgroundColor = "#4A90E2";
+            doubleBuffer.addChild(meter);             
+            
+            const pie = new Node("VkPie");
+            pie.backgroundColor = "#4A90E2";
+            meter.addChild(pie);            
+   
+            const tabPanel = new Node("VkTabPanel");
+            tabPanel.backgroundColor = "#4A90E2";
+            doubleBuffer.addChild(tabPanel);   
+    
+            const iconButton = new Node("VkIconButton");
+            iconButton.backgroundColor = "#4A90E2";
+            component.addChild(iconButton);              
+
+            const scroll = new Node("VkScroll");
+            scroll.backgroundColor = "#4A90E2";
+            component.addChild(scroll);              
+            
+            const tabbedDeck = new Node("VkTabbedDeck");
+            tabbedDeck.backgroundColor = "#4A90E2";
+            component.addChild(tabbedDeck);  
+   
+            const tickMarks = new Node("VkTickMarks");
+            tickMarks.backgroundColor = "#4A90E2";
+            component.addChild(tickMarks);              
+    
+            const vuMeter = new Node("VkVuMeter");
+            vuMeter.backgroundColor = "#4A90E2";
+            component.addChild(vuMeter); 
+   
+            const graph = new Node("VkGraph");
+            graph.backgroundColor = "#4A90E2";
+            component.addChild(graph);             
+            
+            const node = new Node("VkNode");
+            node.backgroundColor = "#4A90E2";
+            component.addChild(node); 
+
+            const outline = new Node("VkOutline");
+            outline.backgroundColor = "#4A90E2";
+            component.addChild(outline);             
+            
+            const outlineASB = new Node("VkOutlineASB");
+            outlineASB.backgroundColor = "#4A90E2";
+            component.addChild(outlineASB);     
+       
+            const textIO = new Node("VkTextIO");
+            textIO.backgroundColor = "#4A90E2";
+            component.addChild(textIO);              
+        
+            const forkIO = new Node("VkForkIO");
+            forkIO.backgroundColor = "#4A90E2";
+            textIO.addChild(forkIO);          
+            
+            const cutPaste = new Node("VkCutPaste");
+            cutPaste.backgroundColor = "#4A90E2";
+            component.addChild(cutPaste); 
+     
+            const modified = new Node("VkModified");
+            modified.backgroundColor = "#4A90E2";
+            component.addChild(modified);             
+   
+            const modifiedAttachment = new Node("VkModifiedAttachment");
+            modifiedAttachment.backgroundColor = "#4A90E2";
+            modified.addChild(modifiedAttachment);  
+         
+            const quickHelp = new Node("VkQuickHelp");
+            quickHelp.backgroundColor = "#4A90E2";
+            component.addChild(quickHelp);             
+            
+            const resizer = new Node("VkResizer");
+            resizer.backgroundColor = "#4A90E2";
+            viewKit.addChild(resizer);       
+  
+            const visual = new Node("VkVisual");
+            visual.backgroundColor = "#4A90E2";
+            viewKit.addChild(visual);             
+            
+            return viewKit;
+        }
+
+        function loadOpenClassHierarchy() {
+            const catalog = new Node("Catalog");
+
+            const base = new Node("IBase");
+            catalog.addChild(base);
+        
+            // Data Types Hierachy
+
+            base.addChild(new Node("IString"));
+            base.addChild(new Node("IDate"));
+            base.addChild(new Node("ITime"));
+
+            const pair = new Node("IPair")
+            pair.addChild(new Node("IPoint"));
+            pair.addChild(new Node("IRange"));
+            pair.addChild(new Node("ISize"));
+            
+            base.addChild(new Node("IRectangle"));
+
+            const bitFlag = new Node("IBitFlag");
+            base.addChild(bitFlag); 
+
+            const handle = new Node("IHandle");
+            base.addChild(handle); 
+
+            const color = new Node("IColor");
+            base.addChild(color);   
+            color.addChild(new Node("IDeviceColor"));
+            color.addChild(new Node("IGUIColor"));  
+
+            // Base Window Class Hierachy
+
+            const base_ = new Node("IVBase");
+            base.addChild(base_); 
+
+            const notifier = new Node("INotifier");
+            base_.addChild(notifier);            
+
+            const window = new Node("IWindow");
+            notifier.addChild(window);  
+
+            const frameWindow = new Node("IFrameWindow");
+            window.addChild(frameWindow);  
+
+            const control = new Node("IControl");
+            window.addChild(control);              
+
+            // Control Class Hierachy
+
+            const canvas = new Node("ICanvas");
+            control.addChild(canvas);
+            
+            canvas.addChild(new Node("IDrawingCanvas"));
+            canvas.addChild(new Node("IMultiCellCanvas"));
+
+            const setCanvas = new Node("ISetCanvas");
+            canvas.addChild(setCanvas);
+
+            setCanvas.addChild(new Node("IToolBar"));
+
+            canvas.addChild(new Node("ISplitCanvas"));
+            canvas.addChild(new Node("IViewPort"));
+
+            const baseListBox = new Node("IBaseListBox");
+            control.addChild(baseListBox);
+
+            baseListBox.addChild(new Node("IListBox"));
+
+            control.addChild(new Node("IContainerControl"));
+            control.addChild(new Node("INotebook"));
+            control.addChild(new Node("IOutlineBox"));
+
+            const progressIndicator = new Node("IProgressIndicator");
+            control.addChild(progressIndicator);
+
+            progressIndicator.addChild(new Node("ISlider"));
+
+            control.addChild(new Node("IScrollBar"));
+
+            const baseSpinButton = new Node("IBaseSpinButton");
+            control.addChild(baseSpinButton);            
+
+            baseSpinButton.addChild(new Node("INumericSpinButton"));
+            baseSpinButton.addChild(new Node("ITextSpinButton"));
+
+            const textControl = new Node("ITextControl");
+            control.addChild(textControl);   
+
+            const button = new Node("IButton");
+            textControl.addChild(button);   
+
+            textControl.addChild(new Node("ICircularSlider"));
+
+            const entryField = new Node("IEntryField");
+            textControl.addChild(entryField);  
+
+            const baseComboBox = new Node("IBaseComboBox");
+            entryField.addChild(baseComboBox);  
+
+            baseComboBox.addChild(new Node("IComboBox"));
+
+            textControl.addChild(new Node("IGroupBox"));
+            textControl.addChild(new Node("IMultiLineEdit"));
+
+            const staticText = new Node("IStaticText");
+            textControl.addChild(staticText);  
+
+            textControl.addChild(new Node("ITitle"));
+
+            // Handler and Event Class Hierarchy
+
+            const handler = new Node("IHandler");
+            base_.addChild(handler);  
+
+            // General Handlers
+
+            handler.addChild(new Node("IClipboardHandler"));
+            handler.addChild(new Node("ICommandHandler"));
+            handler.addChild(new Node("IEditHandler"));
+            handler.addChild(new Node("IFocusHandler"));
+            handler.addChild(new Node("IKeyboardHandler"));
+            
+            const mouseHandler = new Node("IMouseHandler");
+            handler.addChild(mouseHandler);  
+            mouseHandler.addChild(new Node("IMousePointerHandler"));
+
+            handler.addChild(new Node("IPaintHandler"));
+            handler.addChild(new Node("IResizeHandler"));
+            handler.addChild(new Node("ISelectHandler"));
+
+            // Notification Handlers
+
+            // notifier.addChild(new Node(IStandardNotifier));
+
+            const windowNotifyHandler = new Node("IWindowNotifyHandler");
+            handler.addChild(windowNotifyHandler);  
+
+            windowNotifyHandler.addChild(new Node("IListBoxNotifyHandler"));
+            windowNotifyHandler.addChild(new Node("IScrollBarNotifyHandler"));
+            windowNotifyHandler.addChild(new Node("INotebookNotifyHandler"));
+            windowNotifyHandler.addChild(new Node("INumericSpinButtonNotifyHandler"));
+            windowNotifyHandler.addChild(new Node("ITextSpinButtonNotifyHandler"));
+            windowNotifyHandler.addChild(new Node("IFrameWindowNotifyHandler"));
+            windowNotifyHandler.addChild(new Node("IMenuNotifyHandler"));
+
+            const textControlNotifyHandler = new Node("ITextControlNotifyHandler");
+            windowNotifyHandler.addChild(textControlNotifyHandler);  
+
+            const buttonNotifyHandler = new Node("IButtonNotifyHandler");
+            textControlNotifyHandler.addChild(buttonNotifyHandler);  
+
+            buttonNotifyHandler.addChild(new Node("ISettingButtonNotifyHandler"));
+
+            const entryFieldNotifyHandler = new Node("IEntryFieldNotifyHandler");
+            textControlNotifyHandler.addChild(entryFieldNotifyHandler);  
+
+            entryFieldNotifyHandler.addChild(new Node("IComboBoxNotifyHandler"));
+
+            windowNotifyHandler.addChild(new Node("IMultiLineEditNotifyHandler"));
+            windowNotifyHandler.addChild(new Node("ITitleNotifyHandler"));
+
+            // Frame Window Handlers
+
+            handler.addChild(new Node("IFrameHandler"));
+            handler.addChild(new Node("IFileDialogHandler"));
+            handler.addChild(new Node("IFontDialogHandler"));
+
+            // Control Handlers
+
+            handler.addChild(new Node("IControlHandler"));
+            handler.addChild(new Node("IControlEditHandler"));
+            handler.addChild(new Node("IPageHandler"));
+            handler.addChild(new Node("IScrollHandler"));
+            handler.addChild(new Node("IShowListHandler"));
+            handler.addChild(new Node("ISliderArmHandler"));
+            handler.addChild(new Node("ISpinHandler"));
+
+            // Help Handlers
+
+            handler.addChild(new Node("IHelpHandler"));
+            handler.addChild(new Node("IFlyOverHelpHandler"));
+
+            // Menu Handlers
+
+            const menuHandler = new Node("IMenuHandler");
+            handler.addChild(menuHandler);  
+            menuHandler.addChild(new Node("IControlMenuHandler"));
+
+            // Draw-Item Handlers
+
+            handler.addChild(new Node("IControlDrawHandler")); 
+            handler.addChild(new Node("ICustomButtonDrawHandler"));   
+            handler.addChild(new Node("IListBoxDrawItemHandler"));   
+            handler.addChild(new Node("IMenuDrawItemHandler"));   
+            handler.addChild(new Node("ISliderDrawHandler"));   
+ 
+            // handler.addChild(new Node("Control-specific Handlers"));
+            // handler.addChild(new Node("DDE Handlers"));
+            // handler.addChild(new Node("Drag and Drop Handlers"));
+
+            const event = new Node("IEvent");
+            base_.addChild(event);  
+
+            event.addChild(new Node("ICommandEvent"));
+            
+            const controlEvent = new Node("IControlEvent");
+            event.addChild(controlEvent);  
+
+            const drawItemEvent = new Node("IDrawItemEvent");
+            controlEvent.addChild(drawItemEvent); 
+
+            event.addChild(new Node("IListBoxDrawItemEvent"));
+
+            event.addChild(new Node("ICustomButtonDrawEvent"));
+            event.addChild(new Node("IFileDialogEvent"));  
+
+            event.addChild(new Node("IKeyboardEvent"));
+            event.addChild(new Node("IMenuEvent"));
+            event.addChild(new Node("IMenuDrawItemEvent"));
+            event.addChild(new Node("Mouse Events"));
+            event.addChild(new Node("IPaintEvent"));
+            event.addChild(new Node("IResizeEvent"));
+            event.addChild(new Node("Help Events"));
+            event.addChild(new Node("Control-specific Notification Events"));
+            event.addChild(new Node("DDE Events"));
+            event.addChild(new Node("Drag and Drop Events"));
+
+            // Menu Class Hierarchy
+
+            base.addChild(new Node("IAccelerator"));
+            base.addChild(new Node("IAcceleratorKey"));
+            base.addChild(new Node("IAcceleratorTable"));
+            base.addChild(new Node("IMenuItem"));
+
+            const menu = new Node("IMenu");
+            window.addChild(menu);              
+
+            menu.addChild(new Node("IMenuBar"));
+            menu.addChild(new Node("IPopUpMenu"));
+            menu.addChild(new Node("ISubmenu"));
+            menu.addChild(new Node("ISystemMenu"));
+
+            // Static Controls Class Hierarchy
+
+            const bitmapControl = new Node("IBitmapControl");
+            staticText.addChild(bitmapControl);  
+            
+            menu.addChild(new Node("IIconControl"));
+
+            // Button Controls Class Hierarchy
+
+            const settingButton = new Node("ISettingButton");
+            textControl.addChild(settingButton); 
+            
+            settingButton.addChild(new Node("ICheckBox"));
+            settingButton.addChild(new Node("IRadioButton"));
+            settingButton.addChild(new Node("I3StateCheckBox"));
+
+            const pushButton = new Node("IPushButton");
+            textControl.addChild(pushButton); 
+
+            settingButton.addChild(new Node("IGraphicPushButton"));
+
+            const customButton = new Node("ICustomButton");
+            textControl.addChild(customButton);
+            
+            customButton.addChild(new Node("IAnimatedButton"));
+            customButton.addChild(new Node("IToolbarButton"));
+
+            // List Box Controls Class Hierarchy
+
+            baseListBox.addChild(new Node("ICollectionViewListBox"));
+            baseComboBox.addChild(new Node("ICollectionViewComboBox"));
+
+            base_.addChild(new Node("IBaseComboBox::Cursor"));
+            base_.addChild(new Node("IBaseListBox::Cursor"));
+            base_.addChild(new Node("ITextSpinButton::Cursor"));
+
+            // Canvas Class Hierarchy
+
+            setCanvas.addChild(new Node("IToolBarContainer"));
+
+            // Tool Bar Class Hierarchy
+
+            frameWindow.addChild(new Node("IToolBarFrameWindow"));
+
+            // Font Class Hierarchy
+
+            base_.addChild(new Node("IFont"));
+
+            frameWindow.addChild(new Node("IFileDialog"));
+            frameWindow.addChild(new Node("IFontDialog"));
+
+            // DDE Class Hierarchy
+
+            handler.addChild(new Node("IDDEClientConversation"));
+            handler.addChild(new Node("IDDETopicServer"));
+            
+            event.addChild(new Node("IDDEBeginEvent"));
+             
+
+            const iddeEndEvent = new Node("IDDEEndEvent");
+            event.addChild(iddeEndEvent);
+
+            iddeEndEvent.addChild(new Node("IDDEClientEndEvent"));
+
+            const iddeEvent = new Node("IDDEEvent");
+            event.addChild(iddeEvent);   
+           
+            const iddeAcknowledgeEvent = new Node("IDDEAcknowledgeEvent");
+            iddeEvent.addChild(iddeAcknowledgeEvent);             
+
+            iddeAcknowledgeEvent.addChild(new Node("IDDEServerAcknowledgeEvent"));
+            iddeAcknowledgeEvent.addChild(new Node("IDDEClientAcknowledgeEvent"));
+            iddeAcknowledgeEvent.addChild(new Node("IDDEAcknowledgePokeEvent"));
+            iddeAcknowledgeEvent.addChild(new Node("IDDEAcknowledgeExecuteEvent"));
+
+            const iddeSetAcknowledgeInfoEvent = new Node("IDDESetAcknowledgeInfoEvent");
+            iddeEvent.addChild(iddeSetAcknowledgeInfoEvent);  
+
+            iddeSetAcknowledgeInfoEvent.addChild(new Node("IDDEExecuteEvent"));
+            iddeSetAcknowledgeInfoEvent.addChild(new Node("IDDEPokeEvent"));
+            iddeSetAcknowledgeInfoEvent.addChild(new Node("IDDERequestDataEvent"));
+            iddeSetAcknowledgeInfoEvent.addChild(new Node("IDDEServerHotLinkEvent"));
+            iddeSetAcknowledgeInfoEvent.addChild(new Node("IDDEClientHotLinkEvent"));
+            iddeSetAcknowledgeInfoEvent.addChild(new Node("IDDEDataEvent"));
+
+            // Help Class Hierarchy
+
+            base.addChild(new Node("IHelpWindow::Settings"));
+
+            window.addChild(new Node("IHelpWindow"));
+
+            event.addChild(new Node("IHelpErrorEvent"));
+            event.addChild(new Node("IHelpNotifyEvent"));
+            event.addChild(new Node("IHelpHypertextEvent"));
+            event.addChild(new Node("IHelpSubitemNotFoundEvent"));
+            event.addChild(new Node("IHelpMenuBarEvent"));
+            event.addChild(new Node("IHelpTutorialEvent"));
+
+            // Resource Class Hierarchy
+
+            const resourceLibrary = new Node("IResourceLibrary");
+            base_.addChild(resourceLibrary);  
+
+            resourceLibrary.addChild(new Node("IDynamicLinkLibrary"));
+
+            const bitmapHandle = new Node("IBitmapHandle");
+            handle.addChild(bitmapHandle);  
+
+            bitmapHandle.addChild(new Node("ISystemBitmapHandle"));
+
+            const pointerHandle = new Node("IPointerHandle");
+            handle.addChild(pointerHandle);  
+
+            pointerHandle.addChild(new Node("ISystemPointerHandle"));
+
+            base.addChild(new Node("IResourceId"));
+            base.addChild(new Node("IDLLModule"));
+            base.addChild(new Node("IProcedureAddress"));
+
+            // Exception Class Hirarcy
+
+            const exception = new Node("IException");
+            catalog.addChild(exception);  
+
+            exception.addChild(new Node("IAccessError"));
+            exception.addChild(new Node("IAssertionFailure"));
+            exception.addChild(new Node("IDeviceError"));
+            exception.addChild(new Node("IInvalidParameter"));
+            exception.addChild(new Node("IInvalidRequest"));
+
+            const resourceExhausted = new Node("IResourceExhausted");
+            exception.addChild(resourceExhausted); 
+
+            resourceExhausted.addChild(new Node("IOutOfMemory"));
+
+            const outOfMemory = new Node("IOutOfMemory");
+            resourceExhausted.addChild(outOfMemory); 
+
+            outOfMemory.addChild(new Node("IOutOfCollectionMemory"));
+
+            resourceExhausted.addChild(new Node("IOutOfSystemResource"));
+            resourceExhausted.addChild(new Node("IOutOfWindowResource"));
+
+            const preconditionViolation = new Node("IPreconditionViolation");
+            exception.addChild(preconditionViolation); 
+
+            preconditionViolation.addChild(new Node("IChildAlreadyExistsException"));
+            preconditionViolation.addChild(new Node("ICursorInvalidException"));
+            preconditionViolation.addChild(new Node("ICyclicAttachException"));
+            preconditionViolation.addChild(new Node("IEmptyException"));
+            preconditionViolation.addChild(new Node("IFullException"));
+            preconditionViolation.addChild(new Node("IIdenticalCollectionException"));
+            preconditionViolation.addChild(new Node("IInvalidReplacementException"));
+            preconditionViolation.addChild(new Node("IKeyAlreadyExistsException"));
+            preconditionViolation.addChild(new Node("INotBoundedException"));
+            preconditionViolation.addChild(new Node("INotContainsKeyException"));
+            preconditionViolation.addChild(new Node("INotEmptyException"));
+            preconditionViolation.addChild(new Node("IPositionInvalidException"));
+            preconditionViolation.addChild(new Node("IRootAlreadyExistsException"));
+
+            return catalog;
+        }
+
+        function loadHierarchy() {
+            const object = new Node("TObject");
+       
+            const persistent = new Node("TPersistent");
+            object.addChild(persistent);  
+            
+            const component = new Node("TComponent");
+            persistent.addChild(component);  
+
+            const dataSet = new Node("TDataSet");
+            component.addChild(dataSet); 
+
+            const dataSource = new Node("TDataSource");
+            component.addChild(dataSource); 
+
+            const customConnection = new Node("TCustomConnection");
+            component.addChild(customConnection); 
+
+            const database = new Node("TDatabase");
+            customConnection.addChild(database); 
+
+            const field = new Node("TField");
+            component.addChild(field); 
+
+            const dateTimeField = new Node("TDateTimeField");
+            field.addChild(dateTimeField); 
+
+            const dateField = new Node("TDateField");
+            dateTimeField.addChild(dateField); 
+
+            const timeField = new Node("TTimeField");
+            dateTimeField.addChild(timeField); 
+
+            const fields = new Node("TFields");
+            object.addChild(fields); 
+
+            const collection = new Node("TCollection");
+            persistent.addChild(collection); 
+
+            const ownedCollection = new Node("TOwnedCollection");
+            collection.addChild(ownedCollection); 
+
+            const defCollection = new Node("TDefCollection");
+            ownedCollection.addChild(defCollection); 
+
+            const fieldDefs = new Node("TFieldDefs");
+            defCollection.addChild(fieldDefs);
+
+            const collectionItem = new Node("TCollectionItem");
+            persistent.addChild(collectionItem);
+
+            const namedItem = new Node("TNamedItem");
+            collectionItem.addChild(namedItem);
+
+            const fieldDef = new Node("TFieldDef");
+            namedItem.addChild(fieldDef);
+
+            const dataLink = new Node("TDataLink");
+            persistent.addChild(dataLink);
+
+            const detailDataLink = new Node("TDetailDataLink");
+            dataLink.addChild(detailDataLink);
+
+            const blobField = new Node("TBlobField");
+            field.addChild(blobField);
+
+            const memoField = new Node("TMemoField");
+            blobField.addChild(memoField);            
+
+            const lookupList = new Node("TLookupList");
+            object.addChild(lookupList); 
+
+            const numericField = new Node("TNumericField");
+            field.addChild(numericField); 
+
+            const longintField = new Node("TLongintField");
+            numericField.addChild(longintField); 
+
+            const integerField = new Node("TIntegerField");
+            longintField.addChild(integerField); 
+
+            const largeintField = new Node("TLargeintField");
+            numericField.addChild(largeintField); 
+
+            const floatField = new Node("TFloatField");
+            numericField.addChild(floatField); 
+
+            const currencyField = new Node("TCurrencyField");
+            floatField.addChild(currencyField); 
+
+            const booleanField = new Node("TBooleanField");
+            field.addChild(booleanField); 
+
+            const binaryField = new Node("TBinaryField");
+            field.addChild(binaryField); 
+
+            const bytesField = new Node("TBytesField");
+            binaryField.addChild(bytesField); 
+
+            const checkConstraint = new Node("TCheckConstraint");
+            collectionItem.addChild(checkConstraint); 
+
+            const checkConstraints = new Node("TCheckConstraints");
+            collection.addChild(checkConstraints); 
+
+            const bcdField = new Node("TBCDField");
+            numericField.addChild(bcdField); 
+
+            const autoIncField = new Node("TAutoIncField");
+            longintField.addChild(autoIncField); 
+
+            const stringField = new Node("TStringField");
+            field.addChild(stringField); 
+
+            const guidField = new Node("TGuidField");
+            stringField.addChild(guidField); 
+
+            const fmtBCDField = new Node("TFMTBCDField");
+            numericField.addChild(fmtBCDField); 
+
+            const graphicField = new Node("TGraphicField");
+            blobField.addChild(graphicField); 
+
+            const smallintField = new Node("TSmallintField");
+            longintField.addChild(smallintField); 
+
+            const varBytesField = new Node("TVarBytesField");
+            bytesField.addChild(varBytesField); 
+
+            const variantField = new Node("TVariantField");
+            field.addChild(variantField); 
+
+            const wideMemoField = new Node("TWideMemoField");
+            blobField.addChild(wideMemoField); 
+
+            const wideStringField = new Node("TWideStringField");
+            stringField.addChild(wideStringField); 
+
+            const wordField = new Node("TWordField");
+            longintField.addChild(wordField); 
+
+            const dbDataset = new Node("TDBDataset");
+            dataSet.addChild(dbDataset); 
+
+            const dbTransaction = new Node("TDBTransaction");
+            component.addChild(dbTransaction); 
+
+            const indexDef = new Node("TIndexDef");
+            namedItem.addChild(indexDef); 
+
+            const indexDefs = new Node("TIndexDefs");
+            defCollection.addChild(indexDefs);          
+
+            const masterDataLink = new Node("TMasterDataLink");
+            detailDataLink.addChild(masterDataLink);   
+
+            const masterParamsDataLink = new Node("TMasterParamsDataLink");
+            masterDataLink.addChild(masterParamsDataLink); 
+
+            const param = new Node("TParam");
+            collectionItem.addChild(param); 
+
+            const params = new Node("TParams");
+            collection.addChild(params); 
+
+            // -----------------------------------------------------------------------------------
+
+            const list = new Node("TList");
+            object.addChild(list);  
+            
+            const strings = new Node("TStrings");
+            persistent.addChild(strings);  
+
+            const stringList = new Node("TStringList");
+            strings.addChild(stringList);  
+
+            const dataModule = new Node("TDataModule");
+            component.addChild(dataModule);  
+
+            const filer = new Node("TFiler");
+            object.addChild(filer);  
+
+            const thread = new Node("TThread");
+            object.addChild(thread);  
+
+            const threadList = new Node("TThreadList");
+            object.addChild(threadList);  
+
+            // -----------------------------------------------------------------------------------
+
+            const sqlConnection = new Node("TSQLConnection");
+            database.addChild(sqlConnection);              
+
+            const customBufDataset = new Node("TCustomBufDataset");
+            dbDataset.addChild(customBufDataset);   
+
+            const customSQLQuery = new Node("TCustomSQLQuery");
+            customBufDataset.addChild(customSQLQuery);   
+
+            const sqlQuery = new Node("TSQLQuery");
+            customSQLQuery.addChild(sqlQuery); 
+
+            const sqlTransaction = new Node("TSQLTransaction");
+            dbTransaction.addChild(sqlTransaction); 
+
+            const customSQLscript = new Node("TCustomSQLscript");
+            object.addChild(customSQLscript); 
+
+            const sqlScript = new Node("TSQLScript");
+            customSQLscript.addChild(sqlScript); 
+
+            const customSQLStatement = new Node("TCustomSQLStatement");
+            component.addChild(customSQLStatement);             
+
+            const sqlStatement = new Node("TSQLStatement");
+            customSQLStatement.addChild(sqlStatement);  
+
+            const sqlSequence = new Node("TSQLSequence");
+            persistent.addChild(sqlSequence);  
+
+            const sqlHandle = new Node("TSQLHandle");
+            object.addChild(sqlHandle);  
+
+            const sqlDBParams = new Node("TSQLDBParams");
+            params.addChild(sqlDBParams);  
+
+            const sqlDBParam = new Node("TSQLDBParam");
+            param.addChild(sqlDBParam); 
+
+            const sqlDBFieldDef = new Node("TSQLDBFieldDef");
+            fieldDef.addChild(sqlDBFieldDef); 
+
+            const sqlDBFieldDefs = new Node("TSQLDBFieldDefs");
+            fieldDefs.addChild(sqlDBFieldDefs); 
+
+            const sqlConnector = new Node("TSQLConnector");
+            sqlConnection.addChild(sqlConnector); 
+
+            const sqlCursor = new Node("TSQLCursor");
+            sqlHandle.addChild(sqlCursor); 
+
+            const serverIndexDefs = new Node("TServerIndexDefs");
+            indexDefs.addChild(serverIndexDefs); 
+
+            const connectionDef = new Node("TConnectionDef");
+            persistent.addChild(connectionDef); 
+
+            const exception = new Node("Exception");
+            object.addChild(exception); 
+
+            const eDatabaseError = new Node("EDatabaseError");
+            exception.addChild(eDatabaseError); 
+
+            const esqlDatabaseError = new Node("ESQLDatabaseError");
+            eDatabaseError.addChild(esqlDatabaseError); 
+
+            const eUpdateError = new Node("EUpdateError");
+            eDatabaseError.addChild(eUpdateError); 
+
+            // -----------------------------------------------------------------------------------
+            //
+            //      Graphics - unit
+            //
+            // -----------------------------------------------------------------------------------
+
+            const lclComponent = new Node("TLCLComponent");
+            component.addChild(lclComponent);             
+
+            const control = new Node("TControl");
+            lclComponent.addChild(control); 
+
+            const winControl = new Node("TWinControl");
+            control.addChild(winControl); 
+
+            const customControl = new Node("TCustomControl");
+            winControl.addChild(customControl); 
+
+            const graphicControl = new Node("TGraphicControl");
+            control.addChild(graphicControl); 
+
+            const graphic = new Node("TGraphic");
+            persistent.addChild(graphic); 
+
+            const rasterImage = new Node("TRasterImage");
+            graphic.addChild(rasterImage); 
+
+            const customBitmap = new Node("TCustomBitmap");
+            rasterImage.addChild(customBitmap);            
+
+            const fpImageBitmap = new Node("TFPImageBitmap");
+            customBitmap.addChild(fpImageBitmap);  
+
+            const pixmap = new Node("TPixmap");
+            fpImageBitmap.addChild(pixmap); 
+            
+            // -----------------------------------------------------------------------------------
+            //
+            //      Forms - unit
+            //
+            // -----------------------------------------------------------------------------------
+
+            const eScrollBar = new Node("EScrollBar");
+            exception.addChild(eScrollBar); 
+
+            const customApplication = new Node("TCustomApplication");
+            component.addChild(customApplication); 
+
+            const application = new Node("TApplication");
+            customApplication.addChild(application); 
+
+            const applicationProperties = new Node("TApplicationProperties");
+            lclComponent.addChild(applicationProperties); 
+
+            const controlScrollBar = new Node("TControlScrollBar");
+            persistent.addChild(controlScrollBar); 
+
+            const scrollingWinControl = new Node("TScrollingWinControl");
+            customControl.addChild(scrollingWinControl); 
+
+            const customDesignControl = new Node("TCustomDesignControl");
+            scrollingWinControl.addChild(customDesignControl); 
+
+            const screen = new Node("TScreen");
+            lclComponent.addChild(screen);
+
+            const monitor = new Node("TMonitor");
+            object.addChild(monitor);
+
+            const designer = new Node("TIDesigner");
+            object.addChild(designer);
+
+            const monitorList = new Node("TMonitorList");
+            list.addChild(monitorList);
+
+            const customForm = new Node("TCustomForm");
+            customDesignControl.addChild(customForm);
+
+            const form = new Node("TForm");
+            customForm.addChild(form);
+
+            const customDockForm = new Node("TCustomDockForm");
+            customForm.addChild(customDockForm);            
+
+            const customPropStorage = new Node("TCustomPropStorage");
+            component.addChild(customPropStorage);
+
+            const controlPropertyStorage = new Node("TControlPropertyStorage");
+            customPropStorage.addChild(controlPropertyStorage);
+
+            const formPropertyStorage = new Node("TFormPropertyStorage");
+            controlPropertyStorage.addChild(formPropertyStorage);
+
+            const customFrame = new Node("TCustomFrame");
+            customDesignControl.addChild(customFrame);
+
+            const frame = new Node("TFrame");
+            customFrame.addChild(frame);            
+
+            const basicAction = new Node("TBasicAction");
+            component.addChild(basicAction);
+
+            const containedAction = new Node("TContainedAction");
+            basicAction.addChild(containedAction);            
+
+            const customAction = new Node("TCustomAction");
+            containedAction.addChild(customAction);  
+
+            const customHintAction = new Node("TCustomHintAction");
+            customAction.addChild(customHintAction); 
+
+            const hintWindow = new Node("THintWindow");
+            customForm.addChild(hintWindow); 
+
+            const hintWindowRendered = new Node("THintWindowRendered");
+            hintWindow.addChild(hintWindowRendered); 
+
+            const scrollBox = new Node("TScrollBox");
+            scrollingWinControl.addChild(scrollBox); 
+
+            const windowMagnetManager = new Node("TWindowMagnetManager");
+            object.addChild(windowMagnetManager); 
+
+            const windowMagnetOptions = new Node("TWindowMagnetOptions");
+            persistent.addChild(windowMagnetOptions); 
+
+            // -----------------------------------------------------------------------------------
+            //
+            //      lclclasses - unit
+            //
+            // -----------------------------------------------------------------------------------
+
+            const lclReferenceComponent = new Node("TLCLReferenceComponent");
+            lclComponent.addChild(lclReferenceComponent); 
+
+            // -----------------------------------------------------------------------------------
+            //
+            //      Buttons - unit
+            //
+            // -----------------------------------------------------------------------------------
+
+            const buttonControl = new Node("TButtonControl");
+            winControl.addChild(buttonControl); 
+
+            const customButton = new Node("TCustomButton");
+            buttonControl.addChild(customButton); 
+
+            const customBitBtn = new Node("TCustomBitBtn");
+            customButton.addChild(customBitBtn); 
+
+            const bitBtn = new Node("TBitBtn");
+            customBitBtn.addChild(bitBtn); 
+
+            const customSpeedButton = new Node("TCustomSpeedButton");
+            graphicControl.addChild(customSpeedButton);    
+
+            const speedButton = new Node("TSpeedButton");
+            customSpeedButton.addChild(speedButton);          
+         
+            const buttonGlyph = new Node("TButtonGlyph");
+            object.addChild(buttonGlyph);  
+
+            const basicActionLink = new Node("TBasicActionLink");
+            object.addChild(basicActionLink);  
+
+            const actionLink = new Node("TActionLink");
+            basicActionLink.addChild(actionLink);  
+
+            const controlActionLink = new Node("TControlActionLink");
+            actionLink.addChild(controlActionLink);  
+
+            const speedButtonActionLink = new Node("TSpeedButtonActionLink");
+            controlActionLink.addChild(speedButtonActionLink);  
+
+            // -----------------------------------------------------------------------------------
+            //
+            //      ActnList - unit
+            //
+            // -----------------------------------------------------------------------------------
+
+            const actionListEnumerator = new Node("TActionListEnumerator");
+            object.addChild(actionListEnumerator); 
+
+            const actionList = new Node("TActionList");
+            basicActionLink.addChild(actionList);  
+
+            const customActionList = new Node("TCustomActionList");
+            lclComponent.addChild(containedAction); 
+
+            const shortCutList = new Node("TShortCutList");
+            stringList.addChild(shortCutList); 
+
+            const action = new Node("TAction");
+            customAction.addChild(action);  
+
+            // -----------------------------------------------------------------------------------
+
+            /*
+            TButton
+            TLabel
+            TEdit
+            TMemo
+            TToggleBox
+            TCheckBox
+            TRadioButton
+            TListBox
+            TComboBox
+            TScrollBar
+            TGroupBox
+            TRadioGroup
+            TCheckGroup
+            TPanel
+            */
+            
+             
+
+            return object;
+        }
+
+        const root = loadHierarchy();
+
+        // --- Interaction Listeners ---
+        const canvasWrapper = document.getElementById('canvasWrapper');
+        const canvas = document.getElementById('treeCanvas');
+        const ctx = canvas.getContext('2d')
+
+        const view = new View(canvas, ctx);
+        const mouseDragging = new MouseDragging();
+
+        view.isVertical = currentOrientation === 'vertical';
+        view.layoutManager = new VerticalLayoutManager(150 + 20, 40 + 30, 60);
+        
+        canvasWrapper.addEventListener('mousedown', (e) => {
+            mouseDragging.start(e);
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (mouseDragging.move(e)) {
+                view.render(canvas, ctx, root);
+            }
+        });
+
+        window.addEventListener('mouseup', (e) => {
+            if (mouseDragging.end()) {
+                handleCanvasClick(e);
+            }
+        });
+
+        function handleCanvasClick(e) {
+            const rect = canvas.getBoundingClientRect();
+            const worldX = (e.clientX - rect.left - offsetX) / scale;
+            const worldY = (e.clientY - rect.top - offsetY) / scale;
+
+            // clear selected
+            for (let node of allNodesList) {
+                node.isSelected = false;
+            }            
+
+            for (let node of allNodesList) {
+                if (worldX >= node.x - node.width/2 && worldX <= node.x + node.width/2 &&
+                    worldY >= node.y - node.height/2 && worldY <= node.y + node.height/2) {
+
+                    node.isSelected = true;
+                    view.draw(root);
+                    alert(`Clicked Node: "${node.name}"`);
+                    break;
+                }
+            }
+        }
+
+        // canvasWrapper.addEventListener('wheel', (e) => {
+        //     e.preventDefault();
+        //     const zoomIntensity = 0.05;
+        //     const mouseX = e.clientX - canvasWrapper.getBoundingClientRect().left;
+        //     const mouseY = e.clientY - canvasWrapper.getBoundingClientRect().top;
+        //     const zoomFactor = Math.exp((e.deltaY < 0 ? 1 : -1) * zoomIntensity);
+            
+        //     if (scale * zoomFactor < 0.2 || scale * zoomFactor > 4) return;
+
+        //     offsetX = mouseX - (mouseX - offsetX) * zoomFactor;
+        //     offsetY = mouseY - (mouseY - offsetY) * zoomFactor;
+
+        //     scale *= zoomFactor;
+            
+        //     view.render(canvas, ctx, root);
+        // }, { passive: false });
+
+        // Interface Button Events
+        document.getElementById('toggleOrientation').addEventListener('click', (e) => {
+            currentOrientation = currentOrientation === 'vertical' ? 'horizontal' : 'vertical';
+            e.target.textContent = currentOrientation === 'vertical' ? "Switch to Horizontal Layout" : "Switch to Vertical Layout";
+            view.isVertical = currentOrientation === 'vertical';
+
+            if (view.isVertical === true) {
+                view.layoutManager = new VerticalLayoutManager(150 + 20, 40 + 30, 60);
+            } else {
+                view.layoutManager = new HorizontalLayoutManager(40 + 10, 160 + 30, 60);
+            }
+
+            view.draw(root);
+        });
+
+        document.getElementById('resetView').addEventListener('click', () => {
+            scale = 1; 
+            offsetX = 0; 
+            offsetY = 0;
+
+            view.scale = scale;
+            view.offsetX = 0;
+            view.offsetY = 0;
+            view.draw(root);
+
+            debugger;
+
+            const layoutManager = new HorizontalLayoutManager(40 + 10, 160 + 30, 60);
+            layoutManager.doLayout2(root);
+
+            const width = layoutManager.getWidth();
+            const height = layoutManager.getHeight();
+
+            const nodeXY = new NodeXY(root.id, root.name, root.x, root.y, root.width, root.height, root.children);
+
+            debugger;
+            const json = JSON.stringify(nodeXY);
+        });
+
+        document.getElementById('zoomOut').addEventListener('click', () => {
+            scale = scale - 0.1;
+
+            view.scale = scale;
+            
+            view.draw(root);
+        });
+
+        /**
+        * Structural Data File Exporter
+        */
+        document.getElementById('downloadDataBtn').addEventListener('click', () => {
+            // A replica custom replacer filter cleans rendering metrics out of the text dump
+            const jsonFilterReplacer = (key, value) => {
+                if (key === 'x' || key === 'y' || key === 'gridPos') {
+                    return undefined;
+                }
+        
+                return value;
+            };
+
+            // 1. Process tree node details to clean JSON layout structure
+            const jsonString = JSON.stringify(root, jsonFilterReplacer, 4);
+        
+            // 2. Wrap text into a browser file blob standard type
+            const blob = new Blob([jsonString], { type: "application/json" });
+
+            // 3. Mount temporary link object to run native save
+            const link = document.createElement('a');
+            link.download = "tree_structure_data.json";
+            link.href = URL.createObjectURL(blob);
+            document.body.appendChild(link);
+            link.click(); 
+            
+            // Clean memory allocations
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+        });
+    
+        // Run Initial Pass
+        view.draw(root);
+
+    </script>
+</body>
+</html>
